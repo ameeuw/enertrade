@@ -7,6 +7,7 @@ import copy
 class PhotoVoltaics(object):
     def __init__(self, global_data, house):
         self.env = global_data.env
+        self.global_data = global_data
         self.house = house
         self.id = house.id
         self.type = 'pv'
@@ -20,7 +21,7 @@ class PhotoVoltaics(object):
         self.supply = 0
         self.forecast = {'value': 0, 'begin': 0, 'end': 0}
 
-        self.momentary_acknowledged_load = MomentaryAcknowledged(self.env)
+        self.momentary_acknowledged_load = MomentaryAcknowledged(self.global_data)
 
         self.action = self.env.process(self.strategy())
         self.action = self.env.process(self.live())
@@ -73,24 +74,26 @@ class PhotoVoltaics(object):
     def message_handler(self, msg):
         if (msg.topic == '/pv/from/ack') and (msg.tid in self.sent_tids):
             self.sent_tids.remove(msg.tid)
-            print("[{:.3f}] PV[{}]: message in, topic: {}, acknowledged: {}".format(self.env.now, self.id, msg.topic,
+            if self.global_data.debug:
+                print("[{:.3f}] PV[{}]: message in, topic: {}, acknowledged: {}".format(self.env.now, self.id, msg.topic,
                                                                                     msg.data['acknowledged']))
             acknowledged = copy.deepcopy(msg.data['acknowledged'])
             self.momentary_acknowledged_load.append(acknowledged)
 
             self.confirmed_transactions.append(msg)
 
-
         if msg.topic == '/pv/from/req':
-            print("[{:.3f}] PV[{}] message in, topic: {}, forecast: {}".format(self.env.now, self.id, msg.topic,
+            if self.global_data.debug:
+                print("[{:.3f}] PV[{}] message in, topic: {}, forecast: {}".format(self.env.now, self.id, msg.topic,
                                                                                msg.data['forecast']))
 
             request_tid = msg.tid
             request_forecast = msg.data['forecast']
             acknowledged = copy.deepcopy(request_forecast)
+
+            # Get acknowledgeable power amount and commit
             acknowledgable = self.forecast['value'] - self.momentary_acknowledged_load.sum(begin=request_forecast['begin'],
                                                                                            end=request_forecast['end'])
-
             acknowledged['value'] = min(acknowledgable, acknowledged['value'])
 
             if acknowledged['value'] > 0:
@@ -98,8 +101,6 @@ class PhotoVoltaics(object):
                 msg_data = {'sender': self.id, 'receiver': msg.data['sender'], 'type': self.type, 'acknowledged': acknowledged}
                 msg = self.bus.Message('/{}/to/ack'.format(msg.data['type']), msg_data, self.env.now, request_tid)
                 self.env.process(self.bus.send(msg))
-
-            self.confirmed_transactions.append(msg)
 
         yield self.env.exit()
 

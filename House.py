@@ -26,7 +26,7 @@ class House(object):
 
         self.demand = 0
         self.forecast = {'value': 0, 'begin': 0, 'end': 0}
-        self.momentary_acknowledged_supply = MomentaryAcknowledged(self.env)
+        self.momentary_acknowledged_supply = MomentaryAcknowledged(self.global_data)
 
         self.global_data.message_bus.add_message_subscriber(self.message_handler)
 
@@ -49,24 +49,24 @@ class House(object):
 
                 request_forecast['value'] = request_forecast['value'] - self.momentary_acknowledged_supply.sum(begin=request_forecast['begin'],
                                                                                                                end=request_forecast['end'])
-
-                msg_data = {'sender': self.id, 'type': self.type, 'forecast': request_forecast}
-                tid = random.getrandbits(128)
-                msg = self.bus.Message('/pv/from/req', msg_data, self.env.now, tid)
-                self.sent_tids.append(tid)
-                self.env.process(self.bus.send(msg))
-                yield self.env.timeout(self.bus.timeout*5)
+                if request_forecast['value'] > 0:
+                    msg_data = {'sender': self.id, 'type': self.type, 'forecast': request_forecast}
+                    tid = random.getrandbits(128)
+                    msg = self.bus.Message('/pv/from/req', msg_data, self.env.now, tid)
+                    self.sent_tids.append(tid)
+                    self.env.process(self.bus.send(msg))
+                    yield self.env.timeout(self.bus.timeout*5)
 
 
                 request_forecast = deepcopy(self.forecast)
                 request_forecast['value'] = request_forecast['value'] - self.momentary_acknowledged_supply.sum(begin=request_forecast['begin'],
                                                                                                                end=request_forecast['end'])
-
-                msg_data = {'sender': self.id, 'type': self.type, 'forecast': request_forecast}
-                tid = random.getrandbits(128)
-                msg = self.bus.Message('/grid/from/req', msg_data, self.env.now, tid)
-                self.sent_tids.append(tid)
-                self.env.process(self.bus.send(msg))
+                if request_forecast['value'] > 0:
+                    msg_data = {'sender': self.id, 'type': self.type, 'forecast': request_forecast}
+                    tid = random.getrandbits(128)
+                    msg = self.bus.Message('/grid/from/req', msg_data, self.env.now, tid)
+                    self.sent_tids.append(tid)
+                    self.env.process(self.bus.send(msg))
 
 
                 yield self.env.timeout(self.bus.timeout)
@@ -88,7 +88,10 @@ class House(object):
             requestPause = 60
             self.demand = self.demands[int(math.floor(self.env.now / 900))]
 
-            self.forecast['value'] = self.demands[int(math.floor(self.env.now / 900)) + 1]
+            forecast_error = 1 + 0.2
+
+            self.forecast['value'] = self.demands[int(math.floor(self.env.now / 900)) + 1] * forecast_error
+
             self.forecast['begin'] = (int(math.floor(self.env.now / 900)) + 1) * 15 * 60
             self.forecast['end'] = (int(math.floor(self.env.now / 900)) + 2) * 15 * 60
 
@@ -97,17 +100,18 @@ class House(object):
     def message_handler(self, msg):
         if (msg.topic == '/house/to/ack') and (msg.tid in self.sent_tids):
             self.sent_tids.remove(msg.tid)
-            print("[{:.3f}] HOUSE[{}]: message in, topic: {}, acknowledged: {}".format(self.env.now, self.id, msg.topic, msg.data['acknowledged']))
+            if self.global_data.debug:
+                print("[{:.3f}] HOUSE[{}]: message in, topic: {}, acknowledged: {}".format(self.env.now, self.id, msg.topic, msg.data['acknowledged']))
             acknowledged = deepcopy(msg.data['acknowledged'])
 
             if acknowledged['value'] <= self.forecast['value'] - self.momentary_acknowledged_supply.sum(begin=self.forecast['begin'],
                                                                                                         end=self.forecast['end']):
-
+                self.confirmed_transactions.append(msg)
                 msg = self.bus.Message('/{}/from/ack'.format(msg.data['type']), {'acknowledged': acknowledged}, self.env.now, msg.tid)
                 self.env.process(self.bus.send(msg))
 
                 self.momentary_acknowledged_supply.append(acknowledged)
-                self.confirmed_transactions.append(msg)
+
 
         yield self.env.exit()
 
@@ -121,3 +125,8 @@ class House(object):
             self.monitor.append_data(self.plot, 1, self.env.now, self.momentary_acknowledged_supply.sum())
 
             yield self.env.timeout(request_pause)
+
+
+    def print_confirmed_transactions(self):
+        for transaction in self.confirmed_transactions:
+            print('{}'.format(transaction.data))

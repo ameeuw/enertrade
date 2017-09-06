@@ -1,11 +1,13 @@
 class MomentaryAcknowledged(object):
-    def __init__(self, env):
-        self.env = env
+    def __init__(self, global_data):
+        self.env = global_data.env
+        self.global_data = global_data
         self.values = []
         self.action = self.env.process(self.watchdog())
 
     def append(self, acknowledged):
-        print('[{:.3f}] APPENDED: {}'.format(self.env.now, acknowledged))
+        if self.global_data.debug:
+            print('[{:.3f}] APPENDED: {}'.format(self.env.now, acknowledged))
         self.values.append(acknowledged)
 
     def watchdog(self):
@@ -14,7 +16,8 @@ class MomentaryAcknowledged(object):
             for element in self.values:
                 if element['end'] < self.env.now:
                     self.values.remove(element)
-                    print('[{:.3f}] REMOVED: {}'.format(self.env.now, element))
+                    if self.global_data.debug:
+                        print('[{:.3f}] REMOVED: {}'.format(self.env.now, element))
             # print('[{}] Watchdog: {}'.format(self.env.now, self.values))
             yield self.env.timeout(request_pause)
 

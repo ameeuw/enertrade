@@ -12,9 +12,10 @@ class Grid(object):
         self.bus = global_data.message_bus
         self.bus.add_message_subscriber(self.message_handler)
         self.monitor = global_data.monitor
-        self.momentary_acknowledged_load = MomentaryAcknowledged(self.env)
-        self.momentary_acknowledged_supply = MomentaryAcknowledged(self.env)
+        self.momentary_acknowledged_load = MomentaryAcknowledged(self.global_data)
+        self.momentary_acknowledged_supply = MomentaryAcknowledged(self.global_data)
         self.pending_tids = []
+        self.confirmed_transactions = []
 
         self.plot = self.monitor.add_plot()-1
 
@@ -41,7 +42,8 @@ class Grid(object):
 
     def message_handler(self, msg):
         if msg.topic == '/grid/to/req':
-            print("[{:.3f}] GRID: message in, topic: {}, forecast: {}".format(self.env.now, msg.topic, msg.data['forecast']))
+            if self.global_data.debug:
+                print("[{:.3f}] GRID: message in, topic: {}, forecast: {}".format(self.env.now, msg.topic, msg.data['forecast']))
 
             request_tid = msg.tid
             request_forecast = msg.data['forecast']
@@ -52,20 +54,25 @@ class Grid(object):
             msg = self.bus.Message('/{}/from/ack'.format(msg.data['type']), msg_data, self.env.now, request_tid)
             self.env.process(self.bus.send(msg))
 
+        if (msg.topic == '/grid/to/ack'):
+            pass
+
         if (msg.topic == '/grid/from/ack') and (msg.tid in self.pending_tids):
             self.pending_tids.remove(msg.tid)
             acknowledged = deepcopy(msg.data['acknowledged'])
             self.momentary_acknowledged_load.append(acknowledged)
-            pass
+            self.confirmed_transactions.append(msg)
 
         if msg.topic == '/grid/from/req':
-            print("[{:.3f}] GRID: message in, topic: {}, forecast: {}".format(self.env.now, msg.topic, msg.data['forecast']))
+            if self.global_data.debug:
+                print("[{:.3f}] GRID: message in, topic: {}, forecast: {}".format(self.env.now, msg.topic, msg.data['forecast']))
 
             acknowledged = deepcopy(msg.data['forecast'])
-            msg_data = {'sender': self.id, 'receiver': msg.data['sender'], 'type': self.type, 'acknowledged': acknowledged}
-            msg = self.bus.Message('/{}/to/ack'.format(msg.data['type']), msg_data, self.env.now, msg.tid)
-            self.pending_tids.append(msg.tid)
-            self.env.process(self.bus.send(msg))
+            if acknowledged['value'] > 0:
+                msg_data = {'sender': self.id, 'receiver': msg.data['sender'], 'type': self.type, 'acknowledged': acknowledged}
+                msg = self.bus.Message('/{}/to/ack'.format(msg.data['type']), msg_data, self.env.now, msg.tid)
+                self.pending_tids.append(msg.tid)
+                self.env.process(self.bus.send(msg))
 
         yield self.env.exit()
 

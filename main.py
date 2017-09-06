@@ -28,10 +28,10 @@ if (__name__ == '__main__'):
     houses = []
     houses.append(House.House(0, global_data, data_files[0], pv=True))
     houses.append(House.House(1, global_data, data_files[1], pv=True))
-    # houses.append(House.House(2, global_data, data_files[2], pv=True))
-    # houses.append(House.House(3, global_data, data_files[3], pv=True))
-    # houses.append(House.House(4, global_data, data_files[4], pv=True))
-    # houses.append(House.House(5, global_data, data_files[5], pv=True))
+    #houses.append(House.House(2, global_data, data_files[2], pv=True))
+    #houses.append(House.House(3, global_data, data_files[3], pv=True))
+    #houses.append(House.House(4, global_data, data_files[4], pv=True))
+    #houses.append(House.House(5, global_data, data_files[5], pv=True))
     # houses.append(House.House(5, global_data, data_files[6], pv=True))
     # houses.append(House.House(5, global_data, data_files[7], pv=True))
     # houses.append(House.House(5, global_data, data_files[8], pv=True))
@@ -43,6 +43,7 @@ if (__name__ == '__main__'):
     env.run(until=sim_stop)
     monitor.graph.refresh()
 
+    houses[0].print_confirmed_transactions()
 
     if (app):
         app.exec_()

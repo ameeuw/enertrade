@@ -1,0 +1,45 @@
+title Demand & Response Mechanisms
+
+note over House,PV: House requests energy from PVs
+House->+PV: /pv/from/req {forecast}
+note right of PV
+    PV system compares with forecast values
+    and then acknowledges available values
+end note
+PV->-House: /house/to/ack {acknowledged}
+House->PV: /pv/from/ack {acknowledged}
+note right of PV: Valid transaction
+
+
+note over House,Battery: House requests energy from Batteries
+House->+Battery: /battery/from/req {forecast}
+note right of Battery
+    Battery system compares with SoC
+    and then acknowledges available values
+end note
+Battery->-House: /house/to/ack {acknowledged}
+House->Battery: /battery/from/ack {acknowledged}
+
+
+note over House,Grid: House requests energy from Grid
+House->+Grid: /grid/from/req {forecast}
+note right of Grid: Grid always accepts requests.
+Grid->-House: /house/to/ack {acknowledged}
+House->Grid: /grid/from/ack {acknowledged}
+
+note over PV,Battery: PV sends surplus energy to Battery
+PV->Battery: /battery/to/req
+Battery->PV: /pv/from/ack
+PV->Battery: /battery/to/ack
+
+
+note over PV,Grid: PV sends surplus energy to Grid
+PV->Grid: /grid/to/req
+Grid->PV: /pv/from/ack
+PV->Grid: /grid/to/ack
+
+
+note over Battery,Grid: Battery sends surplus energy to Grid
+Battery->Grid: /grid/to/req
+Grid->Battery: /battery/from/ack
+Battery->Grid: /grid/to/ack
