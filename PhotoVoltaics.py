@@ -21,7 +21,8 @@ class PhotoVoltaics(object):
         self.supply = 0
         self.forecast = {'value': 0, 'begin': 0, 'end': 0}
 
-        self.momentary_acknowledged_load = MomentaryAcknowledged(self.global_data)
+        self.momentary_acknowledged_load = MomentaryAcknowledged(self.global_data, 'ack'+self.type, self.id)
+        self.momentary_confirmed_load = MomentaryAcknowledged(self.global_data, 'con'+self.type, self.id)
 
         self.action = self.env.process(self.strategy())
         self.action = self.env.process(self.live())
@@ -35,8 +36,10 @@ class PhotoVoltaics(object):
                 # print("[{:.3f}]\n\nSEND CONDITION\n\n".format(self.env.now))
 
                 request_forecast = copy.deepcopy(self.forecast)
-                request_forecast['value'] = request_forecast['value'] - self.momentary_acknowledged_load.sum(begin=request_forecast['begin'],
-                                                                                                             end=request_forecast['end'])
+                request_forecast['value'] = request_forecast['value'] - \
+                                            self.momentary_confirmed_load.sum(begin=request_forecast['begin'], end=request_forecast['end'])
+
+
 
                 msg_data = {'sender': self.id, 'type': self.type, 'forecast': request_forecast}
                 tid = random.getrandbits(128)
@@ -44,6 +47,12 @@ class PhotoVoltaics(object):
                 self.sent_tids.append(tid)
                 self.env.process(self.bus.send(msg))
 
+                if self.global_data.debug:
+                    print("[{:.3f}] {}[{}]:\tmessage out, topic: {}, forecast: {} | {}".format(self.env.now,
+                                                                                              str.upper(self.type),
+                                                                                              self.id, msg.topic,
+                                                                                              msg.data['forecast'],
+                                                                                              msg.tid))
                 pass
 
             yield self.env.timeout(request_pause)
@@ -52,8 +61,12 @@ class PhotoVoltaics(object):
         return True
 
     def send_condition(self):
-        return self.forecast['value'] > self.momentary_acknowledged_load.sum(begin=self.forecast['begin'],
-                                                                             end=self.forecast['end'])
+        # Get acknowledgeable power amount and commit
+        acknowledgable = self.forecast['value'] - \
+                         self.momentary_acknowledged_load.sum(begin=self.forecast['begin'],
+                                                              end=self.forecast['end']) - \
+                         self.momentary_confirmed_load.sum(begin=self.forecast['begin'], end=self.forecast['end'])
+        return acknowledgable > 0
 
     def live(self):
         _dat = pd.read_csv('data/{}'.format(self.house.file_name), header=None, delimiter=';')
@@ -72,35 +85,53 @@ class PhotoVoltaics(object):
             yield self.env.timeout(request_pause)
 
     def message_handler(self, msg):
-        if (msg.topic == '/pv/from/ack') and (msg.tid in self.sent_tids):
+        if (msg.topic == '/pv/from/ack') and (msg.tid in self.sent_tids) and (msg.data['sender'] == '{}{}'.format(self.type,self.id)):
             self.sent_tids.remove(msg.tid)
             if self.global_data.debug:
-                print("[{:.3f}] PV[{}]: message in, topic: {}, acknowledged: {}".format(self.env.now, self.id, msg.topic,
-                                                                                    msg.data['acknowledged']))
+                print("[{:.3f}] {}[{}]:\tmessage in, topic: {}, acknowledged: {} | {}".format(self.env.now,
+                                                                                          str.upper(self.type), self.id,
+                                                                                          msg.topic,
+                                                                                          msg.data['acknowledged'],
+                                                                                          msg.tid))
+
             acknowledged = copy.deepcopy(msg.data['acknowledged'])
-            self.momentary_acknowledged_load.append(acknowledged)
+
+            self.momentary_acknowledged_load.remove(acknowledged)
+            self.momentary_confirmed_load.append(acknowledged)
 
             self.confirmed_transactions.append(msg)
 
+            bc_msg = copy.deepcopy(msg)
+            bc_msg.data['sender'] = '{}{}'.format(self.type, self.id)
+            bc_msg.topic = '/blockchain/sendRawTx'
+            self.env.process(self.bus.send(bc_msg))
+
         if msg.topic == '/pv/from/req':
             if self.global_data.debug:
-                print("[{:.3f}] PV[{}] message in, topic: {}, forecast: {}".format(self.env.now, self.id, msg.topic,
-                                                                               msg.data['forecast']))
+                print("[{:.3f}] {}[{}]:\tmessage in, topic: {}, forecast: {} | {}".format(self.env.now,
+                                                                                          str.upper(self.type), self.id,
+                                                                                          msg.topic,
+                                                                                          msg.data['forecast'],
+                                                                                          msg.tid))
 
             request_tid = msg.tid
             request_forecast = msg.data['forecast']
             acknowledged = copy.deepcopy(request_forecast)
 
             # Get acknowledgeable power amount and commit
-            acknowledgable = self.forecast['value'] - self.momentary_acknowledged_load.sum(begin=request_forecast['begin'],
-                                                                                           end=request_forecast['end'])
+            acknowledgable = self.forecast['value'] - \
+                             self.momentary_acknowledged_load.sum(begin=request_forecast['begin'],  end=request_forecast['end']) - \
+                             self.momentary_confirmed_load.sum(begin=request_forecast['begin'], end=request_forecast['end'])
+
             acknowledged['value'] = min(acknowledgable, acknowledged['value'])
 
             if acknowledged['value'] > 0:
                 self.momentary_acknowledged_load.append(acknowledged)
-                msg_data = {'sender': self.id, 'receiver': msg.data['sender'], 'type': self.type, 'acknowledged': acknowledged}
+                msg_data = {'sender': '{}{}'.format(self.type,self.id), 'receiver': msg.data['receiver'], 'type': self.type, 'acknowledged': acknowledged}
                 msg = self.bus.Message('/{}/to/ack'.format(msg.data['type']), msg_data, self.env.now, request_tid)
                 self.env.process(self.bus.send(msg))
+                self.sent_tids.append(request_tid)
+
 
         yield self.env.exit()
 
@@ -109,6 +140,6 @@ class PhotoVoltaics(object):
         while True:
             request_pause = 60
             self.monitor.append_data(self.plot, 0, self.env.now, self.supply)
-            # self.monitor.append_data(self.plot, 1, self.env.now, self.forecast['value'])
-            self.monitor.append_data(self.plot, 1, self.env.now, self.momentary_acknowledged_load.sum())
+            self.monitor.append_data(self.plot, 1, self.env.now, self.momentary_confirmed_load.sum())
+            self.monitor.append_data(self.plot, 2, self.env.now, self.momentary_acknowledged_load.sum())
             yield self.env.timeout(request_pause)

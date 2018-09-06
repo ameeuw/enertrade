@@ -1,5 +1,7 @@
 class MomentaryAcknowledged(object):
-    def __init__(self, global_data):
+    def __init__(self, global_data, type, id):
+        self.type = type
+        self.id = id
         self.env = global_data.env
         self.global_data = global_data
         self.values = []
@@ -7,8 +9,19 @@ class MomentaryAcknowledged(object):
 
     def append(self, acknowledged):
         if self.global_data.debug:
-            print('[{:.3f}] APPENDED: {}'.format(self.env.now, acknowledged))
+            print('[{:.3f}] {}[{}]:\tAPPENDED: {}'.format(self.env.now, str.upper(self.type), self.id, acknowledged))
         self.values.append(acknowledged)
+
+    def remove(self, acknowledged):
+        if acknowledged in self.values:
+            self.values.remove(acknowledged)
+            if self.global_data.debug:
+                print('[{:.3f}] {}[{}]:\tREMOVED -f: {}'.format(self.env.now, str.upper(self.type), self.id, acknowledged))
+        else:
+            if self.global_data.debug:
+                print('[{:.3f}] {}[{}]:\tFAILED TO REMOVE: {} '.format(self.env.now, str.upper(self.type), self.id, acknowledged))
+
+
 
     def watchdog(self):
         while True:
@@ -17,7 +30,7 @@ class MomentaryAcknowledged(object):
                 if element['end'] < self.env.now:
                     self.values.remove(element)
                     if self.global_data.debug:
-                        print('[{:.3f}] REMOVED: {}'.format(self.env.now, element))
+                        print('[{:.3f}] {}[{}]:\tREMOVED: {}'.format(self.env.now, str.upper(self.type), self.id, element))
             # print('[{}] Watchdog: {}'.format(self.env.now, self.values))
             yield self.env.timeout(request_pause)
 

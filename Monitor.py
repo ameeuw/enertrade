@@ -1,12 +1,13 @@
 import pyqtgraph as pg
 import numpy as np
-from PyQt4 import QtGui
+from PyQt5 import QtGui
 
 
 class Monitor(QtGui.QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, sim_start=0):
         super(Monitor, self).__init__(parent)
 
+        self.sim_start = sim_start
         self.setWindowTitle("Energy Balance")
         self.setGeometry(200,200,800,300)
         self.layout = QtGui.QHBoxLayout(self)

@@ -12,8 +12,8 @@ class Grid(object):
         self.bus = global_data.message_bus
         self.bus.add_message_subscriber(self.message_handler)
         self.monitor = global_data.monitor
-        self.momentary_acknowledged_load = MomentaryAcknowledged(self.global_data)
-        self.momentary_acknowledged_supply = MomentaryAcknowledged(self.global_data)
+        self.momentary_acknowledged_load = MomentaryAcknowledged(self.global_data, self.type, self.id)
+        self.momentary_acknowledged_supply = MomentaryAcknowledged(self.global_data, self.type, self.id)
         self.pending_tids = []
         self.confirmed_transactions = []
 
@@ -43,14 +43,14 @@ class Grid(object):
     def message_handler(self, msg):
         if msg.topic == '/grid/to/req':
             if self.global_data.debug:
-                print("[{:.3f}] GRID: message in, topic: {}, forecast: {}".format(self.env.now, msg.topic, msg.data['forecast']))
+                print("[{:.3f}] {}[{}]:\tmessage in, topic: {}, forecast: {} | {}".format(self.env.now, str.upper(self.type), self.id, msg.topic, msg.data['forecast'], msg.tid))
 
             request_tid = msg.tid
             request_forecast = msg.data['forecast']
             acknowledged = request_forecast
             acknowledged['value'] = acknowledged['value']
             self.momentary_acknowledged_supply.append(acknowledged)
-            msg_data = {'sender': self.id, 'receiver': msg.data['sender'], 'type': self.type, 'acknowledged': acknowledged}
+            msg_data = {'sender': self.id, 'receiver': msg.data['sender'], 'type': self.type, 'acknowledged': acknowledged, 'receiver':'{}{}'.format(self.type,self.id)}
             msg = self.bus.Message('/{}/from/ack'.format(msg.data['type']), msg_data, self.env.now, request_tid)
             self.env.process(self.bus.send(msg))
 
@@ -58,18 +58,33 @@ class Grid(object):
             pass
 
         if (msg.topic == '/grid/from/ack') and (msg.tid in self.pending_tids):
+            if self.global_data.debug:
+                print("[{:.3f}] {}[{}]:\tmessage in, topic: {}, acknowledged: {} | {}".format(self.env.now,
+                                                                                              str.upper(self.type), self.id,
+                                                                                              msg.topic,
+                                                                                              msg.data['acknowledged'],
+                                                                                              msg.tid))
             self.pending_tids.remove(msg.tid)
             acknowledged = deepcopy(msg.data['acknowledged'])
             self.momentary_acknowledged_load.append(acknowledged)
             self.confirmed_transactions.append(msg)
 
+            bc_msg = deepcopy(msg)
+            bc_msg.data['sender'] = '{}{}'.format(self.type, self.id)
+            bc_msg.topic = '/blockchain/sendRawTx'
+            self.env.process(self.bus.send(bc_msg))
+
         if msg.topic == '/grid/from/req':
             if self.global_data.debug:
-                print("[{:.3f}] GRID: message in, topic: {}, forecast: {}".format(self.env.now, msg.topic, msg.data['forecast']))
+                print("[{:.3f}] {}[{}]:\tmessage in, topic: {}, forecast: {} | {}".format(self.env.now,
+                                                                                          str.upper(self.type), self.id,
+                                                                                          msg.topic,
+                                                                                          msg.data['forecast'],
+                                                                                          msg.tid))
 
             acknowledged = deepcopy(msg.data['forecast'])
             if acknowledged['value'] > 0:
-                msg_data = {'sender': self.id, 'receiver': msg.data['sender'], 'type': self.type, 'acknowledged': acknowledged}
+                msg_data = {'sender': '{}{}'.format(self.type,self.id), 'receiver': msg.data['receiver'], 'type': self.type, 'acknowledged': acknowledged}
                 msg = self.bus.Message('/{}/to/ack'.format(msg.data['type']), msg_data, self.env.now, msg.tid)
                 self.pending_tids.append(msg.tid)
                 self.env.process(self.bus.send(msg))
